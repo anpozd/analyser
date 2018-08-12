@@ -6,12 +6,14 @@
 #include <vector>
 
 #include <boost/iterator/transform_iterator.hpp>
+#include <boost/system/error_code.hpp>
 #include <boost/filesystem.hpp>
 #include <boost/program_options.hpp>
 
 
 namespace fs = boost::filesystem;
 namespace po = boost::program_options;
+namespace sys = boost::system;
 
 struct command_line_arguments {
     const std::string sources_dir;
@@ -85,6 +87,44 @@ static fs::path to_dir_path(const std::string &pathname)
     return path;
 }
 
+static bool is_source_file(const fs::directory_entry &dir_entry)
+{
+    static const fs::path extensions[] = {".h", ".hpp", ".c", ".cpp"};
+
+    if (!is_regular_file(dir_entry.status()))
+        return false;
+
+    const fs::path file_extension = dir_entry.path().extension();
+    if (!file_extension.empty()) {
+        for (const fs::path &extension : extensions) {
+            if (file_extension.compare(extension) == 0)
+                return true;
+        }
+    }
+
+    return false;
+}
+
+static std::vector<fs::path> list_source_files(const fs::path &dir_path)
+{
+    std::vector<fs::path> source_files;
+
+    sys::error_code error_code;
+    fs::recursive_directory_iterator dir_iterator(dir_path, fs::symlink_option::recurse, error_code);
+    fs::recursive_directory_iterator end_iterator;
+    for (; dir_iterator != end_iterator; dir_iterator.increment(error_code)) {
+        if (error_code) {
+            std::cerr << error_code.message() << std::endl;
+            continue;
+        }
+
+        if (is_source_file(*dir_iterator))
+            source_files.push_back(dir_iterator->path());
+    }
+
+    return source_files;
+}
+
 int main(int argc, char *argv[])
 {
     const command_line_arguments arguments = parse_command_line(argc, argv);
@@ -95,10 +135,15 @@ int main(int argc, char *argv[])
             boost::make_transform_iterator(arguments.include_dirs.begin(), to_dir_path),
             boost::make_transform_iterator(arguments.include_dirs.end(), to_dir_path));
 
+        const std::vector<fs::path> source_files = list_source_files(sources_dir);
+
         std::cout << "source dir: " << sources_dir << std::endl;
         std::cout << "include dirs: " << std::endl;
         for (const fs::path &dir : include_dirs)
             std::cout << dir << std::endl;
+        std::cout << "sources: " << std::endl;
+        for (const fs::path &file : source_files)
+            std::cout << file << std::endl;
 
     } catch (const std::exception &exception) {
         std::cerr << exception.what() << std::endl;
