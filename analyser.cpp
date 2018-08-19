@@ -3,6 +3,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <regex>
 #include <vector>
 
 #include <boost/iterator/transform_iterator.hpp>
@@ -125,6 +126,45 @@ static std::vector<fs::path> list_source_files(const fs::path &dir_path)
     return source_files;
 }
 
+struct include_directive {
+    std::string pathname;
+    bool is_global;
+};
+
+static std::vector<include_directive> grep_include_directives(const fs::path &file_path)
+{
+    std::vector<include_directive> include_directives;
+
+    fs::ifstream source_file(file_path);
+    if (!source_file) {
+        std::cerr << "failed to open " << file_path << " for reading\n";
+        return include_directives;
+    }
+
+    static const std::regex include_regex(
+        "\\s*#\\s*include\\s*(?:(?:<(\\S+)>)|(?:\"(\\S+)\"))\\s*(.*)",
+        std::regex::ECMAScript | std::regex::optimize);
+
+   for (std::string line; std::getline(source_file, line);) {
+
+       std::smatch match;
+       if (std::regex_match(line, match, include_regex)) {
+            if (match[1].matched)
+                include_directives.push_back({match.str(1), true});
+            else if (match[2].matched)
+                include_directives.push_back({match.str(2), false});
+
+            line = match.str(3);
+            if (line.empty())
+                continue;
+
+            /* TODO add processing of multiline comments */
+       }
+    }
+
+    return include_directives;
+}
+
 int main(int argc, char *argv[])
 {
     const command_line_arguments arguments = parse_command_line(argc, argv);
@@ -142,8 +182,16 @@ int main(int argc, char *argv[])
         for (const fs::path &dir : include_dirs)
             std::cout << dir << std::endl;
         std::cout << "sources: " << std::endl;
-        for (const fs::path &file : source_files)
+        const char brackets[] = {'<', '>'};
+        const char quotation_marks[]{'\"', '\"'};
+        for (const fs::path &file : source_files) {
             std::cout << file << std::endl;
+            const std::vector<include_directive> include_directives = grep_include_directives(file);
+            for (const include_directive &directive : include_directives) {
+                const auto &ch = directive.is_global ? brackets : quotation_marks;
+                std::cout << "\t#include " << ch[0] << directive.pathname << ch[1] << std::endl;
+            }
+        }
 
     } catch (const std::exception &exception) {
         std::cerr << exception.what() << std::endl;
