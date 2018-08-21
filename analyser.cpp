@@ -165,6 +165,48 @@ static std::vector<include_directive> grep_include_directives(const fs::path &fi
     return include_directives;
 }
 
+struct resolved_include_directive {
+    include_directive directive;
+    fs::path path;
+};
+
+static resolved_include_directive resolve_include_directive(
+    const include_directive &directive, const fs::path &file_path,
+    const std::vector<fs::path> &include_dirs) {
+
+    fs::path resolved_path, include_path(directive.pathname);
+    sys::error_code error_code;
+
+    if (!include_path.is_absolute()) {
+        switch (directive.is_global) {
+        case false:
+            resolved_path = fs::canonical(include_path, file_path.parent_path(), error_code);
+            if (!error_code)
+                break;
+
+        case true:
+            if (!include_dirs.empty()) {
+                for (const fs::path &include_dir : include_dirs) {
+                    resolved_path = fs::canonical(include_path, include_dir, error_code);
+                    if (!error_code)
+                        break;
+                }
+            } else {
+                resolved_path = fs::path();
+            }
+        }
+    } else {
+        resolved_path = fs::canonical(include_path, error_code);
+    }
+
+    /* TODO warn if resolved_path isn't a regular file */
+
+    return resolved_include_directive {
+        directive,
+        resolved_path
+    };
+}
+
 int main(int argc, char *argv[])
 {
     const command_line_arguments arguments = parse_command_line(argc, argv);
@@ -188,8 +230,11 @@ int main(int argc, char *argv[])
             std::cout << file << std::endl;
             const std::vector<include_directive> include_directives = grep_include_directives(file);
             for (const include_directive &directive : include_directives) {
+                const resolved_include_directive resolved_directive = resolve_include_directive(
+                    directive, file, include_dirs);
                 const auto &ch = directive.is_global ? brackets : quotation_marks;
-                std::cout << "\t#include " << ch[0] << directive.pathname << ch[1] << std::endl;
+                std::cout << "\t#include " << ch[0] << resolved_directive.directive.pathname << ch[1]
+                          << " is " << resolved_directive.path << std::endl;
             }
         }
 
