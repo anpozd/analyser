@@ -1,6 +1,7 @@
 
 #include <cstdlib>
 #include <iostream>
+#include <map>
 #include <stdexcept>
 #include <string>
 #include <regex>
@@ -207,8 +208,49 @@ static resolved_include_directive resolve_include_directive(
     };
 }
 
+using dependency_table = std::map<fs::path, std::vector<resolved_include_directive> >;
+
+static dependency_table build_dependency_table(
+    const std::vector<fs::path> &source_files, const std::vector<fs::path> &include_dirs)
+{
+    /* TODO try using unordered_map for both*/
+    dependency_table dependencies;
+    std::map<std::string, resolved_include_directive> global_inclusions;
+
+    for (const auto &file : source_files) {
+        for (const auto &directive : grep_include_directives(file)) {
+
+            auto &file_dependencies = dependencies[file];
+            auto inclusion_iter = global_inclusions.end();
+            auto dependency_iter = file_dependencies.end();
+
+            switch (directive.is_global) {
+            case true:
+                inclusion_iter = global_inclusions.find(directive.pathname);
+                if (inclusion_iter != global_inclusions.end()) {
+                    file_dependencies.push_back(inclusion_iter->second);
+                    break; /* go out of switch since dependency is already resolved */
+                }
+                /* fall through to resolve global dependency */
+
+            case false:
+                dependency_iter = file_dependencies.insert(
+                    file_dependencies.end(),
+                    resolve_include_directive(directive, file, include_dirs));
+                if (directive.is_global)
+                    global_inclusions[directive.pathname] = *dependency_iter;
+            }
+        }
+    }
+
+    return dependencies;
+}
+
 int main(int argc, char *argv[])
 {
+    const char brackets[] = {'<', '>'};
+    const char quotation_marks[] = {'\"', '\"'};
+
     const command_line_arguments arguments = parse_command_line(argc, argv);
 
     try {
@@ -218,25 +260,7 @@ int main(int argc, char *argv[])
             boost::make_transform_iterator(arguments.include_dirs.end(), to_dir_path));
 
         const std::vector<fs::path> source_files = list_source_files(sources_dir);
-
-        std::cout << "source dir: " << sources_dir << std::endl;
-        std::cout << "include dirs: " << std::endl;
-        for (const fs::path &dir : include_dirs)
-            std::cout << dir << std::endl;
-        std::cout << "sources: " << std::endl;
-        const char brackets[] = {'<', '>'};
-        const char quotation_marks[]{'\"', '\"'};
-        for (const fs::path &file : source_files) {
-            std::cout << file << std::endl;
-            const std::vector<include_directive> include_directives = grep_include_directives(file);
-            for (const include_directive &directive : include_directives) {
-                const resolved_include_directive resolved_directive = resolve_include_directive(
-                    directive, file, include_dirs);
-                const auto &ch = directive.is_global ? brackets : quotation_marks;
-                std::cout << "\t#include " << ch[0] << resolved_directive.directive.pathname << ch[1]
-                          << " is " << resolved_directive.path << std::endl;
-            }
-        }
+        const dependency_table dependencies = build_dependency_table(source_files, include_dirs);
 
     } catch (const std::exception &exception) {
         std::cerr << exception.what() << std::endl;
