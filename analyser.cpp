@@ -246,11 +246,55 @@ static dependency_table build_dependency_table(
     return dependencies;
 }
 
+static void print_file_dependency_tree(
+    const fs::path &source_file, const dependency_table &dependencies,
+    const fs::path &root_dir, unsigned int recursion_depth = 0)
+{
+    static const char *indentation_str = "....";
+    static const char *brackets = "<>";
+    static const char *quotation_marks = "\"\"";
+    static const char *absent_mark = " ! ";
+    static const char *present_mark = " ";
+
+    if (!recursion_depth)
+        std::cout << source_file << std::endl; /* TODO make use of root_dir */
+
+    auto dependencies_iter = dependencies.find(source_file);
+    if (dependencies_iter != dependencies.end()) {
+        for (const auto &resolved_inclusion : dependencies_iter->second) {
+            for (unsigned int i = 0; i <= recursion_depth; ++i)
+                std::cout << indentation_str;
+
+            const bool inclusion_absent = resolved_inclusion.path.empty();
+            std::cout << (inclusion_absent ? absent_mark : present_mark);
+
+            const char *chars = resolved_inclusion.directive.is_global ? brackets : quotation_marks;
+            std::cout << chars[0] << resolved_inclusion.directive.pathname << chars[1];
+
+            if (!inclusion_absent) {
+                /* TODO make use of root_dir */
+                std::cout << " -> " << resolved_inclusion.path << std::endl;
+                print_file_dependency_tree(
+                    resolved_inclusion.path, dependencies, root_dir, recursion_depth + 1);
+            } else {
+                std::cout << std::endl;
+            }
+        }
+    }
+}
+
+static void print_dependency_tree(
+    const std::vector<fs::path> &source_files, const dependency_table &dependencies,
+    const fs::path &root_dir)
+{
+    for (const auto &file : source_files) {
+        print_file_dependency_tree(file, dependencies, root_dir);
+        std::cout << std::endl;
+    }
+}
+
 int main(int argc, char *argv[])
 {
-    const char brackets[] = {'<', '>'};
-    const char quotation_marks[] = {'\"', '\"'};
-
     const command_line_arguments arguments = parse_command_line(argc, argv);
 
     try {
@@ -261,6 +305,8 @@ int main(int argc, char *argv[])
 
         const std::vector<fs::path> source_files = list_source_files(sources_dir);
         const dependency_table dependencies = build_dependency_table(source_files, include_dirs);
+
+        print_dependency_tree(source_files, dependencies, sources_dir);
 
     } catch (const std::exception &exception) {
         std::cerr << exception.what() << std::endl;
