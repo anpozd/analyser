@@ -2,6 +2,7 @@
 #include <cstdlib>
 #include <iostream>
 #include <map>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <regex>
@@ -248,13 +249,17 @@ static dependency_table build_dependency_table(
 
 static void print_file_dependency_tree(
     const fs::path &source_file, const dependency_table &dependencies,
-    const fs::path &root_dir, unsigned int recursion_depth = 0)
+    const fs::path &root_dir, unsigned int recursion_depth = 0,
+    std::set<fs::path> visited_files = std::set<fs::path>())
 {
     static const char *indentation_str = "....";
     static const char *brackets = "<>";
     static const char *quotation_marks = "\"\"";
     static const char *absent_mark = " ! ";
     static const char *present_mark = " ";
+    static const char *loop_mark = " @ ";
+
+    visited_files.insert(source_file);
 
     if (!recursion_depth)
         std::cout << source_file << std::endl; /* TODO make use of root_dir */
@@ -265,8 +270,10 @@ static void print_file_dependency_tree(
             for (unsigned int i = 0; i <= recursion_depth; ++i)
                 std::cout << indentation_str;
 
+            const bool inclusion_visited = visited_files.count(resolved_inclusion.path);
             const bool inclusion_absent = resolved_inclusion.path.empty();
-            std::cout << (inclusion_absent ? absent_mark : present_mark);
+            std::cout << (inclusion_visited ? loop_mark
+                                            : (inclusion_absent ? absent_mark : present_mark));
 
             const char *chars = resolved_inclusion.directive.is_global ? brackets : quotation_marks;
             std::cout << chars[0] << resolved_inclusion.directive.pathname << chars[1];
@@ -274,8 +281,11 @@ static void print_file_dependency_tree(
             if (!inclusion_absent) {
                 /* TODO make use of root_dir */
                 std::cout << " -> " << resolved_inclusion.path << std::endl;
-                print_file_dependency_tree(
-                    resolved_inclusion.path, dependencies, root_dir, recursion_depth + 1);
+                if (!inclusion_visited) {
+                    print_file_dependency_tree(
+                        resolved_inclusion.path, dependencies, root_dir,
+                        recursion_depth + 1, visited_files);
+                }
             } else {
                 std::cout << std::endl;
             }
