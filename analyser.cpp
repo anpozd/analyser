@@ -1,4 +1,5 @@
 
+#include <algorithm>
 #include <cstdlib>
 #include <iostream>
 #include <map>
@@ -7,6 +8,7 @@
 #include <string>
 #include <regex>
 #include <vector>
+#include <utility>
 
 #include <boost/iterator/transform_iterator.hpp>
 #include <boost/system/error_code.hpp>
@@ -303,6 +305,39 @@ static void print_dependency_tree(
     }
 }
 
+/* TODO try using unordered_map */
+using inclusion_count_table = std::map<fs::path, unsigned int>;
+
+static inclusion_count_table count_inclusions(const dependency_table &dependencies)
+{
+    inclusion_count_table inclusion_counts;
+    for (const auto &dependency : dependencies) {
+        if (!inclusion_counts.count(dependency.first))
+            inclusion_counts[dependency.first] = 0;
+
+        for (const auto &inclusion : dependency.second)
+            inclusion_counts[inclusion.path] += 1;
+    }
+
+    return inclusion_counts;
+}
+
+static void print_inclusion_counts(const inclusion_count_table &inclusion_counts)
+{
+    using inclusion_count = std::pair<
+        inclusion_count_table::key_type, inclusion_count_table::mapped_type>;
+    std::vector<inclusion_count> sorted_counts(inclusion_counts.begin(), inclusion_counts.end());
+
+    std::sort(sorted_counts.begin(), sorted_counts.end(),
+        [] (const inclusion_count &left, const inclusion_count &right) {
+            return (left.second == right.second)
+                ? (left.first < right.first) : (left.second > right.second);
+        });
+
+    for (const auto &count : sorted_counts)
+        std::cout << count.second << " : " << count.first << std::endl;
+}
+
 int main(int argc, char *argv[])
 {
     const command_line_arguments arguments = parse_command_line(argc, argv);
@@ -317,6 +352,10 @@ int main(int argc, char *argv[])
         const dependency_table dependencies = build_dependency_table(source_files, include_dirs);
 
         print_dependency_tree(source_files, dependencies, sources_dir);
+
+        const inclusion_count_table counts = count_inclusions(dependencies);
+
+        print_inclusion_counts(counts);
 
     } catch (const std::exception &exception) {
         std::cerr << exception.what() << std::endl;
