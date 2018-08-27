@@ -148,21 +148,44 @@ static std::vector<include_directive> grep_include_directives(const fs::path &fi
     static const std::regex include_regex(
         "\\s*#\\s*include\\s*(?:(?:<(\\S+)>)|(?:\"(\\S+)\"))\\s*(.*)",
         std::regex::ECMAScript | std::regex::optimize);
+    static const std::regex comments_opening_regex(
+        ".*(?:/(/)|(\\*))(.*)", std::regex::ECMAScript | std::regex::optimize);
+    static const std::regex comments_closing_regex(
+        ".*\\*/(.*)", std::regex::ECMAScript | std::regex::optimize);
 
+   bool inside_comments = false;
    for (std::string line; std::getline(source_file, line);) {
 
        std::smatch match;
-       if (std::regex_match(line, match, include_regex)) {
-            if (match[1].matched)
-                include_directives.push_back({match.str(1), true});
-            else if (match[2].matched)
-                include_directives.push_back({match.str(2), false});
+       while (!line.empty()) {
+            if (!inside_comments) {
+                if (std::regex_match(line, match, include_regex)) {
+                    if (match[1].matched)
+                        include_directives.push_back({match.str(1), true});
+                    else if (match[2].matched)
+                        include_directives.push_back({match.str(2), false});
 
-            line = match.str(3);
-            if (line.empty())
-                continue;
+                    line = match.str(3); /* process line ending after #include */
+                }
 
-            /* TODO add processing of multiline comments */
+                if (std::regex_match(line, match, comments_opening_regex)) {
+                    if (match[1].matched) {
+                        break; /* single line comments thus process next line */
+                    } else if (match[2].matched) {
+                        inside_comments = true; /* inside multi line comments */
+                        line = match.str(3); // search line ending for the closing */
+                    }
+                } else {
+                    break; /* no comments thus process next line */
+                }
+            } else {
+                if (std::regex_match(line, match, comments_closing_regex)) {
+                    inside_comments = false; /* left multi line comments */
+                    line = match.str(1); // process line ending after the closing */
+                } else {
+                    break; /* no comments thus process next line */
+                }
+            }
        }
     }
 
